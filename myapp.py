@@ -29,14 +29,18 @@ VERIFICATION_LOG_FILENAME = 'verification_log.csv'
 # Load credentials from streamlit secrets or environment variables
 def get_credentials_path():
     try:
-        if 'gcp_credentials' in st.secrets:
+        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+            return os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        elif 'gcp_credentials' in st.secrets:
+            # Create a regular dictionary from the AttrDict
+            credentials_dict = dict(st.secrets["gcp_credentials"])
+            
             # Write credentials to a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
-                credentials_dict = st.secrets["gcp_credentials"]
                 temp.write(json.dumps(credentials_dict).encode())
                 return temp.name
         else:
-            st.error("GCP credentials not found in secrets.")
+            st.error("GCP credentials not found. Please set them up.")
             return None
     except Exception as e:
         st.error(f"Error accessing credentials: {e}")
