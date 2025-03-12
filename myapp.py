@@ -32,12 +32,16 @@ def get_credentials_path():
         if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
             return os.environ['GOOGLE_APPLICATION_CREDENTIALS']
         elif 'gcp_credentials' in st.secrets:
-            # Create a regular dictionary from the AttrDict
-            credentials_dict = dict(st.secrets["gcp_credentials"])
+            # Extract credentials from the nested structure
+            creds = dict(st.secrets["gcp_credentials"])
+            
+            # Convert multi-line private key to proper format if needed
+            if isinstance(creds.get('private_key'), str) and '\\n' not in creds['private_key']:
+                creds['private_key'] = creds['private_key'].replace('\n', '\\n')
             
             # Write credentials to a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
-                temp.write(json.dumps(credentials_dict).encode())
+                temp.write(json.dumps(creds).encode())
                 return temp.name
         else:
             st.error("GCP credentials not found. Please set them up.")
@@ -45,7 +49,6 @@ def get_credentials_path():
     except Exception as e:
         st.error(f"Error accessing credentials: {e}")
         return None
-
 # Use the credentials
 def get_storage_client():
     credentials_path = get_credentials_path()
