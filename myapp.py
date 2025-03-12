@@ -1,4 +1,11 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="AI Signature Verification",
+    page_icon="✍️",
+    layout="wide"
+)
+    
 import cv2
 import numpy as np
 import pandas as pd
@@ -9,7 +16,7 @@ import time
 from datetime import datetime
 from google.cloud import storage
 from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
-
+import json
 # ---------------------------
 # CONFIGURATION & GCP SETUP
 # ---------------------------
@@ -22,27 +29,27 @@ VERIFICATION_LOG_FILENAME = 'verification_log.csv'
 # Load credentials from streamlit secrets or environment variables
 def get_credentials_path():
     try:
-        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-            return os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        elif 'gcp_credentials' in st.secrets:
+        if 'gcp_credentials' in st.secrets:
             # Write credentials to a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
-                temp.write(st.secrets['gcp_credentials'].encode())
+                credentials_dict = st.secrets["gcp_credentials"]
+                temp.write(json.dumps(credentials_dict).encode())
                 return temp.name
         else:
-            st.error("GCP credentials not found. Please set them up.")
+            st.error("GCP credentials not found in secrets.")
             return None
     except Exception as e:
         st.error(f"Error accessing credentials: {e}")
         return None
 
-# Create a GCP Storage client
+# Use the credentials
 def get_storage_client():
     credentials_path = get_credentials_path()
     if credentials_path:
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+        # Now you can create your GCP client
+        from google.cloud import storage
         return storage.Client()
-    return None
 
 # Download the signature database from GCP (if exists) else return empty dict
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -387,11 +394,6 @@ def enroll_person(new_person_id: str, signature_images: list, database: dict):
 # ---------------------------
 
 def main():
-    st.set_page_config(
-        page_title="AI Signature Verification",
-        page_icon="✍️",
-        layout="wide"
-    )
     
     st.title("✍️ AI-Based Signature Verification System")
     
