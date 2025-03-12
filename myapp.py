@@ -15,7 +15,7 @@ from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
 # ---------------------------
 
 # Set your Google Cloud Storage bucket name here
-GCP_BUCKET_NAME = 'sign_verify_bucket'
+GCP_BUCKET_NAME = 'verifysign'
 DATABASE_FILENAME = 'signature_database.pkl'
 VERIFICATION_LOG_FILENAME = 'verification_log.csv'
 
