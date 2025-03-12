@@ -35,20 +35,30 @@ def get_credentials_path():
             # Extract credentials from the nested structure
             creds = dict(st.secrets["gcp_credentials"])
             
-            # Convert multi-line private key to proper format if needed
-            if isinstance(creds.get('private_key'), str) and '\\n' not in creds['private_key']:
-                creds['private_key'] = creds['private_key'].replace('\n', '\\n')
+            # Make sure all required fields are present
+            required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 
+                              'client_email', 'client_id', 'auth_uri', 'token_uri']
+            for field in required_fields:
+                if field not in creds:
+                    st.error(f"Missing required field in credentials: {field}")
+                    return None
             
             # Write credentials to a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
                 temp.write(json.dumps(creds).encode())
-                return temp.name
+                temp_path = temp.name
+                st.write(f"Created temporary credentials file at: {temp_path}")
+                # For debugging, you can print a small part of the file content
+                return temp_path
         else:
             st.error("GCP credentials not found. Please set them up.")
             return None
     except Exception as e:
         st.error(f"Error accessing credentials: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
+    
 # Use the credentials
 def get_storage_client():
     credentials_path = get_credentials_path()
