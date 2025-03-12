@@ -4,4 +4,3 @@ numpy
 pandas
 google-cloud-storage
 scikit-learn
-tempfile
