@@ -271,67 +271,40 @@ def extract_signature(processed_image: np.ndarray) -> np.ndarray:
     if processed_image is None:
         return None
     
-    # Convert normalized image back to uint8 for thresholding
+    # Convert the normalized image back to uint8 for thresholding
     image_uint8 = (processed_image * 255).astype(np.uint8)
     
-    # Apply adaptive thresholding for better results with varying lighting
+    # Apply adaptive thresholding with your chosen parameters
     thresh = cv2.adaptiveThreshold(
-        image_uint8, 
-        255, 
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY_INV, 
-        11, 
-        2
+        image_uint8,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11,   # block size; adjust as needed
+        2     # constant subtracted from the mean
     )
     
-    # Optional: Apply morphological operations to clean up noise
+    # Use morphological closing to fill gaps and reduce noise
     kernel = np.ones((3, 3), np.uint8)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     
-    # Find contours
+    # Find external contours in the thresholded image
     contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
     if not contours:
         return None
     
-    # Filter contours to find signature-like shapes
-    valid_contours = []
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < 100:  # Skip very small contours (noise)
-            continue
-            
-        # Calculate contour perimeter and derive shape complexity
-        perimeter = cv2.arcLength(contour, True)
-        if perimeter == 0:
-            continue
-            
-        complexity = area / perimeter
-        aspect_ratio = 1.0
-        
-        # Calculate bounding box and aspect ratio
-        x, y, w, h = cv2.boundingRect(contour)
-        if w > 0 and h > 0:
-            aspect_ratio = float(w) / h
-        
-        # Signatures typically have a certain complexity and aspect ratio
-        if complexity < 50 and 0.1 < aspect_ratio < 10:
-            valid_contours.append(contour)
-    
-    if not valid_contours:
+    # Select the largest contour assuming it corresponds to the signature
+    largest_contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(largest_contour) < 500:  # Reject if the area is too small
         return None
     
-    # Create a mask combining all valid contours
-    mask = np.zeros_like(thresh)
-    cv2.drawContours(mask, valid_contours, -1, 255, -1)
+    # Get bounding box of the largest contour and add a small margin
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    margin = 10
+    x = max(x - margin, 0)
+    y = max(y - margin, 0)
+    signature_region = image_uint8[y:y+h+margin, x:x+w+margin]
     
-    # Find the bounding rectangle of the combined mask
-    x, y, w, h = cv2.boundingRect(mask)
-    
-    # Extract the signature region
-    signature_region = image_uint8[y:y+h, x:x+w]
-    
-    # Return the signature region
     return signature_region
 
 # Check whether the extracted region is likely to be a signature
@@ -339,20 +312,26 @@ def check_signature_presence(signature_region: np.ndarray) -> bool:
     if signature_region is None:
         return False
     
-    # Check if the region is too small
     height, width = signature_region.shape
-    if height * width < 1000:  # Minimum area threshold
+    if height * width < 1000:  # too small to be a valid signature
         return False
     
-    # Check if the region is too empty (percentage of foreground pixels)
+    # Binarize the image and compute the ratio of black pixels (foreground)
     _, binary = cv2.threshold(signature_region, 127, 255, cv2.THRESH_BINARY)
-    foreground_ratio = np.sum(binary == 0) / (height * width)
-    if foreground_ratio < 0.01:  # Less than 1% foreground pixels
+    black_pixels = np.sum(binary == 0)
+    ratio = black_pixels / (height * width)
+    
+    # If too few dark pixels, or if nearly the whole image is dark, reject it
+    if ratio < 0.05 or ratio > 0.8:
         return False
     
-    # Check if the signature has a reasonable aspect ratio
+    # Ensure there is enough variation in pixel intensity
+    if np.std(signature_region) < 10:
+        return False
+    
+    # Check for a reasonable aspect ratio
     aspect_ratio = width / height
-    if aspect_ratio < 0.2 or aspect_ratio > 5:  # Likely not a signature
+    if aspect_ratio < 0.2 or aspect_ratio > 5:
         return False
     
     return True
@@ -362,32 +341,26 @@ def extract_features(signature_region: np.ndarray) -> np.ndarray:
     if signature_region is None:
         return None
     
-    # Resize for consistent feature extraction
+    # Resize the signature region to a consistent size for feature extraction
     signature_region = cv2.resize(signature_region, (100, 100))
     
     # 1. Histogram of Oriented Gradients (HOG) features
-    # Calculate gradients
     gx = cv2.Sobel(signature_region, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(signature_region, cv2.CV_32F, 0, 1, ksize=3)
     mag, ang = cv2.cartToPolar(gx, gy)
-    
-    # Bin the angles into 9 orientation bins
     bins = np.linspace(0, 2*np.pi, 10)
     hist = np.zeros(9)
     for i in range(9):
         mask = (ang >= bins[i]) & (ang < bins[i+1])
         hist[i] = np.sum(mag[mask])
-    
-    # Normalize
     if np.sum(hist) > 0:
         hist = hist / np.sum(hist)
     
-    # 2. Intensity histogram (as before)
+    # 2. Intensity histogram features
     intensity_hist = cv2.calcHist([signature_region], [0], None, [32], [0, 256])
     intensity_hist = cv2.normalize(intensity_hist, intensity_hist).flatten()
     
-    # 3. Zoning features
-    # Divide the image into 4x4 zones and calculate average intensity
+    # 3. Zoning features: Average intensity in 4x4 zones
     zone_features = []
     h, w = signature_region.shape
     zone_h, zone_w = h // 4, w // 4
@@ -396,9 +369,14 @@ def extract_features(signature_region: np.ndarray) -> np.ndarray:
             zone = signature_region[i*zone_h:(i+1)*zone_h, j*zone_w:(j+1)*zone_w]
             zone_features.append(np.mean(zone))
     
-    # 4. Combine all features
+    # Concatenate all features into a single vector
     all_features = np.concatenate([hist, intensity_hist, zone_features])
     
+    # Normalize the feature vector to unit norm to help with cosine similarity comparisons
+    norm = np.linalg.norm(all_features)
+    if norm > 0:
+        all_features = all_features / norm
+        
     return all_features
 
 # Compute weighted cosine similarity
