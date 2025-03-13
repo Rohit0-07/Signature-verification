@@ -12,6 +12,7 @@ import pandas as pd
 import pickle
 import os
 import time
+import hashlib
 from datetime import datetime
 from google.cloud import storage
 from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
@@ -26,6 +27,10 @@ from google.cloud import storage
 GCP_BUCKET_NAME = 'verifysign'
 DATABASE_FILENAME = 'signature_database.pkl'
 VERIFICATION_LOG_FILENAME = 'verification_log.csv'
+ADMIN_CONFIG_FILENAME = 'admin_config.pkl'
+
+# Default admin password hash (you should change this during first run)
+DEFAULT_ADMIN_PASSWORD = 'adminpassword123'  # This will be hashed before storage
 
 from google.oauth2 import service_account
 from google.cloud import storage
@@ -148,6 +153,72 @@ def log_verification_attempt(person_id, similarity, verified, image_hash):
     except Exception as e:
         st.warning(f"Could not log verification attempt: {e}")
         return False
+
+# ---------------------------
+# ADMIN AUTHENTICATION
+# ---------------------------
+
+# Hash a password using SHA-256
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Load admin configuration from GCP
+def load_admin_config():
+    client = get_storage_client()
+    if not client:
+        return {"password_hash": hash_password(DEFAULT_ADMIN_PASSWORD)}
+    
+    # Ensure bucket exists
+    if not ensure_bucket_exists():
+        return {"password_hash": hash_password(DEFAULT_ADMIN_PASSWORD)}
+    
+    bucket = client.bucket(GCP_BUCKET_NAME)
+    blob = bucket.blob(ADMIN_CONFIG_FILENAME)
+    
+    try:
+        if not blob.exists():
+            # Create default admin config
+            admin_config = {"password_hash": hash_password(DEFAULT_ADMIN_PASSWORD)}
+            data = pickle.dumps(admin_config)
+            blob.upload_from_string(data)
+            return admin_config
+        
+        # Download and deserialize the admin config
+        data = blob.download_as_bytes()
+        admin_config = pickle.loads(data)
+        return admin_config
+    except Exception as e:
+        st.warning(f"Error loading admin config: {e}. Using default.")
+        return {"password_hash": hash_password(DEFAULT_ADMIN_PASSWORD)}
+
+# Save admin configuration to GCP
+def save_admin_config(admin_config):
+    client = get_storage_client()
+    if not client:
+        st.error("Could not connect to GCP. Admin config not updated.")
+        return False
+    
+    # Ensure bucket exists
+    if not ensure_bucket_exists():
+        return False
+    
+    try:
+        bucket = client.bucket(GCP_BUCKET_NAME)
+        blob = bucket.blob(ADMIN_CONFIG_FILENAME)
+        
+        # Serialize and upload the admin config
+        data = pickle.dumps(admin_config)
+        blob.upload_from_string(data)
+        return True
+    except Exception as e:
+        st.error(f"Error saving admin config: {e}")
+        return False
+
+# Verify admin password
+def verify_admin_password(password, admin_config):
+    password_hash = hash_password(password)
+    return password_hash == admin_config["password_hash"]
+
 # ---------------------------
 # HELPER FUNCTIONS
 # ---------------------------
@@ -336,6 +407,8 @@ def compute_similarity(feature1: np.ndarray, feature2: np.ndarray) -> float:
         return 0.0
     
     # Ensure features are same length
+    
+# Ensure features are same length
     min_length = min(len(feature1), len(feature2))
     feature1 = feature1[:min_length]
     feature2 = feature2[:min_length]
@@ -430,6 +503,13 @@ def enroll_person(new_person_id: str, signature_images: list, database: dict):
 # ---------------------------
 
 def main():
+    # Initialize session state
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'admin_config' not in st.session_state:
+        st.session_state.admin_config = load_admin_config()
+    if 'first_run' not in st.session_state:
+        st.session_state.first_run = True
     
     st.title("✍️ AI-Based Signature Verification System")
     
@@ -459,13 +539,41 @@ def main():
     # Load the database from GCP
     database = load_database_from_gcp()
     
+    # Check if this is the first run and default password needs changing
+    if st.session_state.first_run and st.session_state.admin_config["password_hash"] == hash_password(DEFAULT_ADMIN_PASSWORD):
+        st.warning("⚠️ You are using the default admin password. Please change it immediately in the 'Manage Database' section.")
+    
+    st.session_state.first_run = False
+    
     # Display different app modes
     if app_mode == "Verify Signature":
         run_verification_mode(database, similarity_threshold)
     elif app_mode == "Enroll New Person":
         run_enrollment_mode(database)
     elif app_mode == "Manage Database":
-        run_management_mode(database)
+        # Require authentication for database management
+        if not st.session_state.authenticated:
+            admin_login()
+        else:
+            run_management_mode(database)
+
+
+def admin_login():
+    st.header("🔐 Admin Login Required")
+    
+    st.write("Authentication is required to access database management features.")
+    
+    with st.form("login_form"):
+        password = st.text_input("Admin Password", type="password")
+        submit_button = st.form_submit_button("Login")
+        
+        if submit_button:
+            if verify_admin_password(password, st.session_state.admin_config):
+                st.session_state.authenticated = True
+                st.success("Authentication successful!")
+                st.rerun()
+            else:
+                st.error("Incorrect password. Please try again.")
 
 
 def run_verification_mode(database, threshold):
@@ -663,6 +771,39 @@ def run_enrollment_mode(database):
 def run_management_mode(database):
     st.header("🗄️ Database Management")
     
+    # Show logout button
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("Logout"):
+            st.session_state.authenticated = False
+            st.rerun()
+    
+    # Option to change admin password
+    with st.expander("🔑 Change Admin Password"):
+        st.write("Change the administrator password for database management")
+        
+        with st.form("change_password_form"):
+            current_password = st.text_input("Current Password", type="password")
+            new_password = st.text_input("New Password", type="password")
+            confirm_password = st.text_input("Confirm New Password", type="password")
+            
+            submit_button = st.form_submit_button("Change Password")
+            
+            if submit_button:
+                if not verify_admin_password(current_password, st.session_state.admin_config):
+                    st.error("Current password is incorrect.")
+                elif new_password != confirm_password:
+                    st.error("New passwords don't match.")
+                elif len(new_password) < 8:
+                    st.error("New password must be at least 8 characters long.")
+                else:
+                    # Update password
+                    st.session_state.admin_config["password_hash"] = hash_password(new_password)
+                    if save_admin_config(st.session_state.admin_config):
+                        st.success("Password changed successfully!")
+                    else:
+                        st.error("Failed to save new password.")
+    
     # Display database statistics
     st.subheader("Database Statistics")
     
@@ -677,7 +818,7 @@ def run_management_mode(database):
             st.metric("Total Persons", total_persons)
         with col2:
             st.metric("Total Signatures", total_signatures)
-        with col3:
+        with col3:                      
             st.metric("Avg. Signatures per Person", round(total_signatures / total_persons, 1))
         
         # Person details
@@ -713,7 +854,7 @@ def run_management_mode(database):
                     del database[person_to_delete]
                     if upload_database_to_gcp(database):
                         st.success(f"Person '{person_to_delete}' deleted successfully.")
-                        st.experimental_rerun()
+                        st.rerun()
     
     with col2:
         # Backup/restore options
@@ -746,7 +887,7 @@ def run_management_mode(database):
                     
                     if upload_database_to_gcp(database):
                         st.success("Database restored successfully.")
-                        st.experimental_rerun()
+                        st.rerun()
             except Exception as e:
                 st.error(f"Error restoring database: {e}")
 
