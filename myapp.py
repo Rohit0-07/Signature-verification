@@ -9,15 +9,12 @@ st.set_page_config(
 import cv2
 import numpy as np
 import pandas as pd
-import tempfile
 import pickle
 import os
 import time
 from datetime import datetime
 from google.cloud import storage
 from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
-import json
-
 from google.oauth2 import service_account
 from google.cloud import storage
 
@@ -579,11 +576,11 @@ def run_verification_mode(database, threshold):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.image(image, caption="Original Image", use_column_width=True)
+            st.image(image, caption="Original Image", use_container_width=True)
             
         with col2:
             if signature_region is not None:
-                st.image(signature_region, caption="Extracted Signature", use_column_width=True)
+                st.image(signature_region, caption="Extracted Signature", use_container_width=True)
 
 
 def run_enrollment_mode(database):
@@ -634,7 +631,7 @@ def run_enrollment_mode(database):
                 with col:
                     image = load_image(file)
                     if image is not None:
-                        st.image(image, caption=f"Sample {i+1}", use_column_width=True)
+                        st.image(image, caption=f"Sample {i+1}", use_container_width=True)
     
     # Enrollment button
     if st.button("Enroll Person", type="primary", disabled=(not new_person_id or not uploaded_files)):
