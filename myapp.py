@@ -764,6 +764,7 @@ def run_enrollment_mode(database):
             
             # Save updated database to GCP
             if upload_database_to_gcp(database):
+                load_database_from_gcp.clear()  # Clear cached database so new enrollment appears immediately
                 st.balloons()
                 st.success(f"Enrollment completed for '{new_person_id}'!")
 
@@ -841,21 +842,23 @@ def run_management_mode(database):
     col1, col2 = st.columns(2)
     
     with col1:
-        # Delete person
+    # Delete person
         if database:
-            person_to_delete = st.selectbox(
-                "Select person to delete",
-                list(database.keys()),
-                key="delete_person"
-            )
+            person_to_delete = st.selectbox("Select person to delete", list(database.keys()), key="delete_person")
+            # Place the confirmation checkbox outside of the button callback
+            confirm_deletion = st.checkbox(f"Confirm deletion of '{person_to_delete}'", key="confirm_deletion")
             
             if st.button("Delete Person", type="secondary"):
-                if st.checkbox(f"Confirm deletion of '{person_to_delete}'"):
+                if confirm_deletion:
                     del database[person_to_delete]
                     if upload_database_to_gcp(database):
+                        load_database_from_gcp.clear()  # Clear cache to reflect deletion immediately
                         st.success(f"Person '{person_to_delete}' deleted successfully.")
                         st.rerun()
-    
+                else:
+                    st.error("Please confirm deletion by checking the box.")
+
+
     with col2:
         # Backup/restore options
         if st.button("Download Database Backup"):
