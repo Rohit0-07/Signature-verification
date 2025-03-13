@@ -17,6 +17,10 @@ from datetime import datetime
 from google.cloud import storage
 from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
 import json
+
+from google.oauth2 import service_account
+from google.cloud import storage
+
 # ---------------------------
 # CONFIGURATION & GCP SETUP
 # ---------------------------
@@ -26,47 +30,41 @@ GCP_BUCKET_NAME = 'verifysign'
 DATABASE_FILENAME = 'signature_database.pkl'
 VERIFICATION_LOG_FILENAME = 'verification_log.csv'
 
-# Load credentials from streamlit secrets or environment variables
-def get_credentials_path():
-    try:
-        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-            return os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        elif 'gcp_credentials' in st.secrets:
-            # Extract credentials from the nested structure
-            creds = dict(st.secrets["gcp_credentials"])
-            
-            # Make sure all required fields are present
-            required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 
-                              'client_email', 'client_id', 'auth_uri', 'token_uri']
-            for field in required_fields:
-                if field not in creds:
-                    st.error(f"Missing required field in credentials: {field}")
-                    return None
-            
-            # Write credentials to a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
-                temp.write(json.dumps(creds).encode())
-                temp_path = temp.name
-                st.write(f"Created temporary credentials file at: {temp_path}")
-                # For debugging, you can print a small part of the file content
-                return temp_path
-        else:
-            st.error("GCP credentials not found. Please set them up.")
-            return None
-    except Exception as e:
-        st.error(f"Error accessing credentials: {e}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-    
-# Use the credentials
+from google.oauth2 import service_account
+from google.cloud import storage
+from google.cloud.exceptions import NotFound
+
+# Get a Google Cloud Storage client using Streamlit secrets
 def get_storage_client():
-    credentials_path = get_credentials_path()
-    if credentials_path:
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-        # Now you can create your GCP client
-        from google.cloud import storage
-        return storage.Client()
+    try:
+        # Directly use Streamlit secrets for authentication
+        creds_info = dict(st.secrets["gcp_credentials"])
+        credentials = service_account.Credentials.from_service_account_info(creds_info)
+        return storage.Client(credentials=credentials, project=creds_info.get('project_id'))
+    except KeyError:
+        st.error("GCP credentials not found in Streamlit secrets. Please set up the 'gcp_credentials' section.")
+        return None
+    except Exception as e:
+        st.error(f"GCP Authentication Error: {str(e)}")
+        st.info("If running locally, make sure your .streamlit/secrets.toml file is properly configured.")
+        return None
+
+# Ensure the GCP bucket exists, create if it doesn't
+def ensure_bucket_exists():
+    client = get_storage_client()
+    if not client:
+        return False
+    
+    try:
+        bucket = client.bucket(GCP_BUCKET_NAME)
+        if not bucket.exists():
+            st.info(f"Bucket '{GCP_BUCKET_NAME}' does not exist. Creating now...")
+            bucket = client.create_bucket(GCP_BUCKET_NAME)
+            st.success(f"Bucket '{GCP_BUCKET_NAME}' created successfully.")
+        return True
+    except Exception as e:
+        st.error(f"Error accessing or creating bucket: {e}")
+        return False
 
 # Download the signature database from GCP (if exists) else return empty dict
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -75,15 +73,26 @@ def load_database_from_gcp():
     if not client:
         return {}
     
+    # Ensure bucket exists
+    if not ensure_bucket_exists():
+        return {}
+    
     bucket = client.bucket(GCP_BUCKET_NAME)
     blob = bucket.blob(DATABASE_FILENAME)
+    
     try:
+        # Check if the database file exists
+        if not blob.exists():
+            st.info(f"Database file '{DATABASE_FILENAME}' not found. Starting with an empty database.")
+            return {}
+        
+        # Download and deserialize the database
         data = blob.download_as_bytes()
         database = pickle.loads(data)
         st.success("Database loaded successfully from GCP.")
         return database
     except Exception as e:
-        st.warning(f"Database not found or could not be loaded: {e}. Starting with an empty database.")
+        st.warning(f"Error loading database: {e}. Starting with an empty database.")
         return {}
 
 # Upload the updated database to GCP
@@ -93,9 +102,15 @@ def upload_database_to_gcp(database):
         st.error("Could not connect to GCP. Database not updated.")
         return False
     
+    # Ensure bucket exists
+    if not ensure_bucket_exists():
+        return False
+    
     try:
         bucket = client.bucket(GCP_BUCKET_NAME)
         blob = bucket.blob(DATABASE_FILENAME)
+        
+        # Serialize and upload the database
         data = pickle.dumps(database)
         blob.upload_from_string(data)
         st.success("Database updated on GCP.")
@@ -108,27 +123,34 @@ def upload_database_to_gcp(database):
 def log_verification_attempt(person_id, similarity, verified, image_hash):
     client = get_storage_client()
     if not client:
-        return
+        st.warning("Could not connect to GCP. Verification attempt not logged.")
+        return False
     
-    bucket = client.bucket(GCP_BUCKET_NAME)
-    blob = bucket.blob(VERIFICATION_LOG_FILENAME)
-    
-    log_entry = f"{datetime.now()},{person_id},{similarity:.4f},{verified},{image_hash}\n"
+    # Ensure bucket exists
+    if not ensure_bucket_exists():
+        return False
     
     try:
-        # Try to append to existing file
-        content = ""
-        try:
+        bucket = client.bucket(GCP_BUCKET_NAME)
+        blob = bucket.blob(VERIFICATION_LOG_FILENAME)
+        
+        # Prepare log entry
+        log_entry = f"{datetime.now()},{person_id},{similarity:.4f},{verified},{image_hash}\n"
+        
+        # Check if log file exists and append or create
+        if blob.exists():
             content = blob.download_as_string().decode('utf-8')
-        except:
+        else:
             # If file doesn't exist, create header
             content = "timestamp,person_id,similarity,verified,image_hash\n"
         
+        # Append new log entry
         content += log_entry
         blob.upload_from_string(content)
+        return True
     except Exception as e:
         st.warning(f"Could not log verification attempt: {e}")
-
+        return False
 # ---------------------------
 # HELPER FUNCTIONS
 # ---------------------------
