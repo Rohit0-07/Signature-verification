@@ -3,9 +3,7 @@ opencv-python
 numpy
 pandas
 google-cloud-storage
-google-cloud-vision
-google-cloud-aiplatform
-google-generativeai
 google-auth
 scikit-learn
 Pillow
+tensorflow

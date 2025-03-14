@@ -13,12 +13,8 @@ import pandas as pd
 import pickle
 import time
 import hashlib
-import base64
-from io import BytesIO
-from PIL import Image
 from datetime import datetime
 from google.cloud import storage
-from google.cloud import vision  # kept as-is for storage/admin info (unused in signature analysis)
 from google.oauth2 import service_account
 from sklearn.metrics.pairwise import cosine_similarity
 
