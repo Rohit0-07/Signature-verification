@@ -523,11 +523,19 @@ def run_enrollment_mode(database):
                     st.error("Please enter a valid signature image. No signature detected in this image.")
 
             if valid_images and st.button("Enroll Person with AI", type="primary"):
+                st.info("📤 Uploading data to the database...")
                 database = enroll_person_with_llm(new_person_id, valid_images, database)
+                
+                # Ensure database upload and cache refresh happens
                 if upload_database_to_gcp(database):
                     load_database_from_gcp.clear()  # Clear cached database
+                    st.success("✅ Database successfully updated!")
+                    database = load_database_from_gcp()
                     st.balloons()
-                    st.success(f"Enrollment completed for '{new_person_id}'!")
+                    st.success(f"🎉 Enrollment completed for '{new_person_id}'!")
+                else:
+                    st.error("❌ Failed to upload the updated database. Please check GCP configuration or try again.")
+                    st.warning("Check network connection or permissions on your GCP bucket.")
 
     with st.expander("Tips for best results with AI"):
         st.markdown(
