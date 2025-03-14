@@ -61,7 +61,7 @@ def ensure_bucket_exists():
         st.error(f"Error accessing or creating bucket: {e}")
         return False
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+# @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_database_from_gcp():
     client = get_storage_client()
     if not client:
@@ -324,13 +324,15 @@ def enroll_person_with_llm(new_person_id, signature_images, database):
         st.success(f"Enrolled new person '{new_person_id}' with {valid_count} signature samples.")
 
     # Upload the updated database to GCP
-    if not upload_database_to_gcp(database):
-        st.error("Failed to upload updated database. Please check GCP configuration.")
-    else:
-        load_database_from_gcp.clear()  # Clear cached database
-        database = load_database_from_gcp()  # Ensure fresh data is reloaded
+    if upload_database_to_gcp(database):
+        load_database_from_gcp.clear()  # Clear cached database if caching is re-enabled later
+        st.success("✅ Database successfully updated!")
+        database = load_database_from_gcp()  # Reload updated database
+        st.write("Updated Database:", database)  # Debug: show current database
         st.balloons()
-        st.success(f"Enrollment completed for '{new_person_id}'!")
+        st.success(f"🎉 Enrollment completed for '{new_person_id}'!")
+    else:
+        st.error("❌ Failed to upload the updated database. Please check GCP configuration or try again.")
 
     return database
 def generate_image_hash(image):
