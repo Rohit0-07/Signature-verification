@@ -448,7 +448,7 @@ def run_verification_mode(database, threshold):
                     st.warning("No similar signatures found in database")
                 log_verification_attempt("failed", similarity, False, image_hash)
             st.text(message)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        st.image(image, caption="Uploaded Image", use_container_width=True)
 
 def run_enrollment_mode(database):
     st.header("➕ Enroll New Person")
@@ -483,7 +483,7 @@ def run_enrollment_mode(database):
                 with col:
                     image = load_image(file)
                     if image is not None:
-                        st.image(image, caption=f"Sample {i+1}", use_column_width=True)
+                        st.image(image, caption=f"Sample {i+1}", use_container_width=True)
     if st.button("Preprocess Images", type="primary", disabled=(not new_person_id or not uploaded_files)):
         if new_person_id.strip() == "":
             st.error("Please provide a valid person ID.")
@@ -503,7 +503,7 @@ def run_enrollment_mode(database):
                 st.write(f"Sample {i+1}")
                 signature_region = detect_signature_with_vision_api(img)
                 if signature_region is not None:
-                    st.image(signature_region, caption="Processed Image", use_column_width=True)
+                    st.image(signature_region, caption="Processed Image", use_container_width=True)
                     keep_image = st.checkbox(f"Keep Sample {i+1}", value=True)
                     if keep_image:
                         valid_images.append(signature_region)
