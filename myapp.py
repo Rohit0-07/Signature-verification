@@ -318,6 +318,11 @@ def enroll_person_with_llm(new_person_id, signature_images, database):
     else:
         database[new_person_id] = embeddings
         st.success(f"Enrolled new person '{new_person_id}' with {valid_count} signature samples.")
+    # Upload the updated database to GCP
+    if upload_database_to_gcp(database):
+        load_database_from_gcp.clear()  # Clear cached database
+        st.balloons()
+        st.success(f"Enrollment completed for '{new_person_id}'!")
     return database
 
 def generate_image_hash(image):
