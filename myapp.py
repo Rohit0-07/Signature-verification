@@ -94,6 +94,7 @@ def upload_database_to_gcp(database):
         blob = bucket.blob(DATABASE_FILENAME)
         data = pickle.dumps(database)
         blob.upload_from_string(data)
+        load_database_from_gcp.clear()  # Clear cached database
         st.success("Database updated on GCP.")
         return True
     except Exception as e:
