@@ -61,8 +61,11 @@ def ensure_bucket_exists():
         st.error(f"Error accessing or creating bucket: {e}")
         return False
 
-# @st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_database_from_gcp():
+    # Add this line at the beginning of the function
+    if 'load_database_from_gcp' in st.session_state and hasattr(load_database_from_gcp, 'clear'):
+        load_database_from_gcp.clear()
     client = get_storage_client()
     if not client:
         return {}
