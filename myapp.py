@@ -477,6 +477,17 @@ def run_enrollment_mode(database):
             help="Upload multiple samples of the person's signature for better accuracy"
         )
 
+    with col2:
+        st.subheader("Preview")
+        if uploaded_files:
+            st.write(f"Number of samples: {len(uploaded_files)}")
+            preview_cols = st.columns(min(3, len(uploaded_files)))
+            for i, (col, file) in enumerate(zip(preview_cols, uploaded_files[:3])):
+                with col:
+                    image = load_image(file)
+                    if image is not None:
+                        st.image(image, caption=f"Sample {i+1}", use_container_width=True)
+
     if st.button("Preprocess Images", type="primary", disabled=(not new_person_id or not uploaded_files)):
         if new_person_id.strip() == "":
             st.error("Please provide a valid person ID.")
@@ -495,8 +506,8 @@ def run_enrollment_mode(database):
                 signature_region = detect_signature_with_vision_api(img)
                 if signature_region is not None:
                     st.image(signature_region, caption="Processed Image", use_container_width=True)
-                    
-                    # Preserve checkbox state per image
+
+                    # Ensure checkbox state sticks per image
                     if f"keep_image_{i}" not in st.session_state:
                         st.session_state[f"keep_image_{i}"] = True
 
@@ -517,57 +528,18 @@ def run_enrollment_mode(database):
                     load_database_from_gcp.clear()  # Clear cached database
                     st.balloons()
                     st.success(f"Enrollment completed for '{new_person_id}'!")
-                    
-        with st.expander("Tips for best results with AI"):
-            st.markdown("""
+
+    with st.expander("Tips for best results with AI"):
+        st.markdown(
+            """
             - Upload at least 3-5 different signature samples  
             - Ensure good lighting and contrast  
             - Include variations of the signature  
             - Use clear backgrounds  
             - Crop images close to the signature if possible  
             - Include both clean signatures and signatures in context (e.g., on forms)
-            """)
-    with col2:
-        st.subheader("Preview")
-        if uploaded_files:
-            st.write(f"Number of samples: {len(uploaded_files)}")
-            preview_cols = st.columns(min(3, len(uploaded_files)))
-            for i, (col, file) in enumerate(zip(preview_cols, uploaded_files[:3])):
-                with col:
-                    image = load_image(file)
-                    if image is not None:
-                        st.image(image, caption=f"Sample {i+1}", use_container_width=True)
-    if st.button("Preprocess Images", type="primary", disabled=(not new_person_id or not uploaded_files)):
-        if new_person_id.strip() == "":
-            st.error("Please provide a valid person ID.")
-        elif not uploaded_files:
-            st.error("Please upload at least one signature image.")
-        else:
-            images = []
-            for file in uploaded_files:
-                img = load_image(file)
-                if img is not None:
-                    images.append(img)
-            if not images:
-                st.error("None of the uploaded files could be processed. Please check the formats.")
-                return
-            valid_images = []
-            for i, img in enumerate(images):
-                st.write(f"Sample {i+1}")
-                signature_region = detect_signature_with_vision_api(img)
-                if signature_region is not None:
-                    st.image(signature_region, caption="Processed Image", use_container_width=True)
-                    keep_image = st.checkbox(f"Keep Sample {i+1}", value=True)
-                    if keep_image:
-                        valid_images.append(signature_region)
-                else:
-                    st.error("Please enter a valid signature image. No signature detected in this image.")
-            if valid_images and st.button("Enroll Person with AI", type="primary"):
-                database = enroll_person_with_llm(new_person_id, valid_images, database)
-                if upload_database_to_gcp(database):
-                    load_database_from_gcp.clear()  # Clear cached database
-                    st.balloons()
-                    st.success(f"Enrollment completed for '{new_person_id}'!")
+            """
+        )
 
 def run_management_mode(database):
     st.header("🗄️ Database Management")
