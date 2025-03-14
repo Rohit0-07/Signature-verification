@@ -295,6 +295,7 @@ def enroll_person_with_llm(new_person_id, signature_images, database):
     if not signature_images:
         st.error("No signature images provided for enrollment.")
         return database
+
     embeddings = []
     valid_count = 0
     with st.spinner("Processing signature samples..."):
@@ -310,22 +311,28 @@ def enroll_person_with_llm(new_person_id, signature_images, database):
                 embeddings.append(embedding)
                 valid_count += 1
                 st.image(signature_region, caption=f"Sample {i+1}: Detected Signature", width=300)
+
     if not embeddings:
         st.error("No valid signature features extracted. Enrollment failed.")
         return database
+
     if new_person_id in database:
         database[new_person_id].extend(embeddings)
         st.success(f"Added {valid_count} new signature samples for existing person '{new_person_id}'.")
     else:
         database[new_person_id] = embeddings
         st.success(f"Enrolled new person '{new_person_id}' with {valid_count} signature samples.")
+
     # Upload the updated database to GCP
-    if upload_database_to_gcp(database):
+    if not upload_database_to_gcp(database):
+        st.error("Failed to upload updated database. Please check GCP configuration.")
+    else:
         load_database_from_gcp.clear()  # Clear cached database
+        database = load_database_from_gcp()  # Ensure fresh data is reloaded
         st.balloons()
         st.success(f"Enrollment completed for '{new_person_id}'!")
-    return database
 
+    return database
 def generate_image_hash(image):
     if image is None:
         return "none"
@@ -455,22 +462,62 @@ def run_verification_mode(database, threshold):
                 log_verification_attempt("failed", similarity, False, image_hash)
             st.text(message)
         st.image(image, caption="Uploaded Image", use_container_width=True)
-
+        
 def run_enrollment_mode(database):
     st.header("➕ Enroll New Person")
     col1, col2 = st.columns([1, 1])
+    
     with col1:
         st.subheader("Enrollment Details")
         new_person_id = st.text_input("Enter person ID:", help="Use a unique identifier for this person")
-        is_existing = new_person_id in database
-        if is_existing and new_person_id:
-            st.info(f"'{new_person_id}' already exists with {len(database[new_person_id])} signatures. Adding more samples.")
         uploaded_files = st.file_uploader(
             "Upload signature samples (at least 3 recommended)",
             type=["png", "jpg", "jpeg", "bmp"],
             accept_multiple_files=True,
             help="Upload multiple samples of the person's signature for better accuracy"
         )
+
+    if st.button("Preprocess Images", type="primary", disabled=(not new_person_id or not uploaded_files)):
+        if new_person_id.strip() == "":
+            st.error("Please provide a valid person ID.")
+        elif not uploaded_files:
+            st.error("Please upload at least one signature image.")
+        else:
+            images = [load_image(file) for file in uploaded_files if load_image(file) is not None]
+
+            if not images:
+                st.error("None of the uploaded files could be processed. Please check the formats.")
+                return
+
+            valid_images = []
+            for i, img in enumerate(images):
+                st.write(f"Sample {i+1}")
+                signature_region = detect_signature_with_vision_api(img)
+                if signature_region is not None:
+                    st.image(signature_region, caption="Processed Image", use_container_width=True)
+                    
+                    # Preserve checkbox state per image
+                    if f"keep_image_{i}" not in st.session_state:
+                        st.session_state[f"keep_image_{i}"] = True
+
+                    keep_image = st.checkbox(
+                        f"Keep Sample {i+1}",
+                        value=st.session_state[f"keep_image_{i}"],
+                        key=f"checkbox_{i}"
+                    )
+
+                    if keep_image:
+                        valid_images.append(signature_region)
+                else:
+                    st.error("Please enter a valid signature image. No signature detected in this image.")
+
+            if valid_images and st.button("Enroll Person with AI", type="primary"):
+                database = enroll_person_with_llm(new_person_id, valid_images, database)
+                if upload_database_to_gcp(database):
+                    load_database_from_gcp.clear()  # Clear cached database
+                    st.balloons()
+                    st.success(f"Enrollment completed for '{new_person_id}'!")
+                    
         with st.expander("Tips for best results with AI"):
             st.markdown("""
             - Upload at least 3-5 different signature samples  
